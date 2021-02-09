@@ -5,7 +5,9 @@ using UnityEngine;
 public class CharacterControl : MonoBehaviour
 {
     [Tooltip("скорость перемещения персонажа")]
-    [SerializeField] private float speed = 5f;   // скорость перемещения персонажа
+    [SerializeField] private float Speed = 5f;          // скорость перемещения персонажа
+    [Tooltip("слот 1 оружия ближнего боя")]
+    [SerializeField] private GameObject WeaponSlot1;    // слот 1 оружия ближнего боя
 
     private Rigidbody body;                 // физическое тело игрока
     private Vector3 inputs;                 // вектор движения получаемый от нажатий кнопок управления игроком
@@ -13,19 +15,29 @@ public class CharacterControl : MonoBehaviour
     private Camera mainCamera;              // основная камера
     private Transform mainCameraTransform;  // transform основной камеры
     private Vector3 moveGlobal;             // вектор перемещения
-    private Vector3 lookDirection;          // вектор направления взгляда персонажа
+    private Quaternion lookRotation;        // направление взгляда персонажа
     private Animator animator;              // аниматор
-    private bool OnOffAttack;               // переключаем возможность двигатся во время атаки
+
+    private MeleeAttack meleeAttack;        // компонент атаки в ближнем бою
+    private GameObject melee1WeaponObj;     // объект оружия ближнего боя из слота 1
+    private Collider melee1WeaponCollider;  // коллайдер оружия ближнего боя из слота 1
 
     void Start()
     {
-        inputs = Vector3.zero;                          // обнуляем перед началом игры на всякий случай
-        body = GetComponent<Rigidbody>();               //Получаем компонент Rigidbody
-        playerTransform = GetComponent<Transform>();    // получаем transform
-        mainCamera = FindObjectOfType<Camera>();        // НАходим на сцене главную камеру
-        mainCameraTransform = mainCamera.transform;     //Получаем трансформ главной камеры для оптимизации
-        animator = GetComponent<Animator>();            //Получаем Аниматор
-        OnOffAttack = true;
+        inputs = Vector3.zero;                          // обнуление ввода перед началом игры на всякий случай
+        body = GetComponent<Rigidbody>();               // получение компонента Rigidbody
+        playerTransform = GetComponent<Transform>();    // получение Трансформа персонажа
+        mainCamera = FindObjectOfType<Camera>();        // находим на сцене главную камеру
+        mainCameraTransform = mainCamera.transform;     // получение Трансформа главной камеры для оптимизации
+        animator = GetComponent<Animator>();            // получение Аниматора
+
+        if (WeaponSlot1.transform.childCount > 0)       // проверка наличия дочерних компонентов в слоте 1 оружия ближнего боя
+        {
+            melee1WeaponObj = WeaponSlot1.transform.GetChild(0).gameObject;             // получаем объект оружия ближнего боя из слота 1
+            melee1WeaponCollider = melee1WeaponObj.GetComponentInChildren<Collider>();  // получение коллайдера для нанесения урона
+        }
+
+        meleeAttack = GetComponent<MeleeAttack>();
     }
 
     void Update()
@@ -33,45 +45,28 @@ public class CharacterControl : MonoBehaviour
         inputs.x = Input.GetAxis("Horizontal"); // получаем от игрока вектор перемещения по x кнопки A и D
         inputs.z = Input.GetAxis("Vertical");   // получаем от игрока вектор перемещения по y кнопки W и S
 
-        float cameraYRotation = mainCameraTransform.eulerAngles.y;                  // угол поворота камеры вокруг оси Y  
-        moveGlobal = Quaternion.AngleAxis(cameraYRotation, Vector3.up) * inputs;    // перемещение персонажа
-
+        float cameraYRotation = mainCameraTransform.eulerAngles.y;          // угол поворота камеры вокруг оси Y  
         RaycastHit hit;
-        Ray cameraRay = mainCamera.ScreenPointToRay(Input.mousePosition);                   // создаем луч который выходит из камеры и стремится к позиции курсора
-        Physics.Raycast(cameraRay, out hit);                                                // получаем луч
-        lookDirection = new Vector3(hit.point.x, playerTransform.position.y, hit.point.z);  // направление взгляда персонажа
+        Ray cameraRay = mainCamera.ScreenPointToRay(Input.mousePosition);   // создаем луч который выходит из камеры и стремится к позиции курсора
+        Physics.Raycast(cameraRay, out hit);                                // получаем луч
+        lookRotation = Quaternion.LookRotation((new Vector3(hit.point.x, 0, hit.point.z) - new Vector3(playerTransform.position.x, 0, playerTransform.position.z)).normalized);
 
-        Vector3 moveLocal = playerTransform.InverseTransformDirection(moveGlobal); // преобразование глобальных координат перемещения персонажа в локальные
-        animator.SetFloat("Forward", moveLocal.z);   // анимация движения впепёд / назад
-        animator.SetFloat("Right", moveLocal.x);     // анимация движения влево / вправо
+        moveGlobal = Quaternion.AngleAxis(cameraYRotation, Vector3.up) * inputs;    // перемещение персонажа
+        Vector3 moveLocal = playerTransform.InverseTransformDirection(moveGlobal);  // преобразование глобальных координат перемещения персонажа в локальные
+        animator.SetFloat("Forward", moveLocal.z);                                  // анимация движения вперёд / назад
+        animator.SetFloat("Right", moveLocal.x);                                    // анимация движения влево / вправо
+        
 
-        if (Input.GetMouseButtonDown(0))            // Отслеживаем нажатие игроком кнопки атаки
+        if (Input.GetMouseButtonDown(0) && meleeAttack != null) // отслеживание нажатия игроком кнопки атаки и проверка комонента атаки ближнего боя
         {
-            OnOffAttack = false;                    //Переключаем переменную чтобы персонаж не двигался пока длится атака
-            if (co != null)                         // Останавливаем карутину если она уже была запущена
-            {
-                StopCoroutine(co);
-            }
-            co = StartCoroutine(Attack());
+            moveGlobal = Vector3.zero;                          // обнуление перемещения персонажа
+            meleeAttack.InitAttack(melee1WeaponCollider);       // инициализация атаки
         }
     }
 
     private void FixedUpdate()
     {
-        if (OnOffAttack)
-            body.MovePosition(body.position + moveGlobal * speed * Time.fixedDeltaTime);    // перемещение персонажа
-
-        playerTransform.LookAt(lookDirection);                                              // поворот персонажа
+        body.MovePosition(body.position + moveGlobal * Speed * Time.fixedDeltaTime);                                // перемещение персонажа
+        playerTransform.rotation = Quaternion.Slerp(playerTransform.rotation, lookRotation, 5f * Time.deltaTime);   // поворот персонажа
     }
-    /// <summary>
-    /// Корутина анимации атаки
-    /// </summary>
-    /// <returns></returns>
-    IEnumerator Attack()
-    {
-        animator.SetTrigger("Attack");          // включаем анимацию атаки
-        yield return new WaitForSeconds(1.4f);  // ждем пока анимация проиграет
-        OnOffAttack = true;                     // Возвращаем игроку управление
-    }
-    Coroutine co; //инициалзируем контейнер для корутины
 }
